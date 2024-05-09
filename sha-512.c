@@ -65,31 +65,31 @@ H_Values initialize_H_Values() {
     return h_values;
 }
 
-void padding(uint8_t *message, uint32_t length) {
+uint32_t padding(uint8_t *message, uint32_t length) {
     // Calculate the number of bytes needed for padding
     // 1024 bits = 128 bytes, length is in bytes. 16 bytes are reserved for the length of the message in bits
     // however we only plan to support messages up to 2kb, so we can use 4 bytes for length, see later
-    int padding_bytes = 128 - (length % 128) - 16;
+    uint32_t padding_bytes;
+    if ( (128 - (length % 128)) < 16) {
+        padding_bytes = 128 + 128 - (length % 128) - 16;
+    } else {
+        padding_bytes = 128 - (length % 128) - 16;
+    }
 
     // First bit should be 1 from left, since the smallest cell is 1 byte, it means that first byte after msg must be 0x80
     message[length] = 0x80;
 
     // Append padding zeros
-    memset(message + length + 1, 0, padding_bytes - 1 + 16 - 4);
-    // Append the length of the message in bits
-    uint32_t length_bits = __builtin_bswap32(length * 8);
-    uint8_t length_bits_array[4] = {length_bits & 0xFF, (length_bits >> 8) & 0xFF, (length_bits >> 16) & 0xFF, (length_bits >> 24) & 0xFF};
-    // printf("length_bits = %02x%02x%02x%02x\n",  length_bits_array[0], length_bits_array[1], length_bits_array[2], length_bits_array[3]);
     
+    memset(message + length + 1, 0, (padding_bytes - 1 + 16 - 4));
+    // Append the length of the message in bits
+    uint32_t length_bits = __builtin_bswap32(length * (uint32_t) 8);
     memcpy(message + length + padding_bytes  + 16 - 4, &length_bits, sizeof(uint32_t));
-    message[length + padding_bytes] |= length_bits;
-
-    // printf("Padded message in hex: ");
-    // printf("\n\n%d\n\n", length+padding_bytes+16);
-    // for (int i=0; i<length+padding_bytes+16; i++) {
-    //     printf("%02x", (uint8_t) message[i]);
+    // for (int i = 0; i < 4; i++) {
+    //     message[length + padding_bytes + i] = (uint8_t) (length_bits & 0xFF >> (8 * i));
     // }
-    // printf("\n");
+    message[length + padding_bytes] |= length_bits;
+    return length + padding_bytes + 16;
 }
 
 
@@ -169,14 +169,14 @@ H_Values process_message(uint8_t *message, uint32_t length) {
     H_Values h_values = initialize_H_Values();
     
     // Pad the message
-    padding(message, length);
-    uint32_t block_count = 1 + (length) / 64;  // Adjusted for bits to bytes + padding
+    length = padding(message, length);
+    uint32_t block_count = (length) / 128;  // Adjusted for bits to bytes + padding
     printf("block_count: %d\n", block_count);
     // Process the message in 1024-bit blocks 
     for (uint32_t i = 0; i < block_count; i++) {
         // Process the block
         printf("Processing block %d\n", i);
-        process_block(message + i * 64, &h_values);
+        process_block(message + i * 128, &h_values);
     }
     return h_values;
 }
@@ -184,8 +184,8 @@ H_Values process_message(uint8_t *message, uint32_t length) {
 void main() {
     // initialize h-values
     // uint8_t message[3000] = "Ana are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere fAna are multe mere f";
-    uint8_t message[3000] = "416e61206172652013qwerasdfzxcvtyuighjkbnma416e61206172652013qwe";
-    uint32_t length = strlen("416e61206172652013qwerasdfzxcvtyuighjkbnma416e61206172652013qwe");
+    uint8_t message[3000] = "1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM";
+    uint32_t length = strlen("1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMnmQWERTYUIOPASDFGHJKLZXCVBNM1234567890qwertyuiopasdfghjklzxcvbnmQWERTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMTYUIOPASDFGHJKLZXCVBNMOPASDFGHJKLZXCVBNM");
     printf("length = %d\n", length);
     // H_Values h_values = process_message(message, 2000);
     H_Values h_values = process_message(message, length);
