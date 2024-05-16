@@ -7,8 +7,8 @@
             "args": [
                 "-fdiagnostics-color=always",
                 "-g",
-                "${workspaceFolder}\\sources\\main.c",
-                "${workspaceFolder}\\sources\\CySecDrv.c",
+                "${workspaceFolder}\\sources\\PoC\\main.c",
+                "${workspaceFolder}\\sources\\PoC\\CySecDrv.c",
                 "-o",
                 "${workspaceFolder}\\main.exe"
             ],

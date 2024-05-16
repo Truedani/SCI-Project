@@ -168,51 +168,56 @@ void getNextChunk() {
         }
         lastChunk = true;
     }
-    for (int i = 0; i < 128; i++) {
-        printf("%02x", chunk[i]);
-    }
     return;
 }
 
+uint64_t words[80];
+void wordsInit() {
+    uint16_t i = 0;
+    for (i = 0; i < 16; i++) {
+        uint16_t offset = i * 8;
+        words[i] = ((uint64_t)(uint8_t)chunk[offset]     << 56) |
+                   ((uint64_t)(uint8_t)chunk[offset + 1] << 48) |
+                   ((uint64_t)(uint8_t)chunk[offset + 2] << 40) |
+                   ((uint64_t)(uint8_t)chunk[offset + 3] << 32) |
+                   ((uint64_t)(uint8_t)chunk[offset + 4] << 24) |
+                   ((uint64_t)(uint8_t)chunk[offset + 5] << 16) |
+                   ((uint64_t)(uint8_t)chunk[offset + 6] << 8)  |
+                    (uint64_t)(uint8_t)chunk[offset + 7];
+    }
+    for (i = 16; i < 80; i++) {
+        uint64_t s0 = right_rotate(words[i - 15], 1) ^ right_rotate(words[i - 15], 8) ^ (words[i - 15] >> 7);
+        uint64_t s1 = right_rotate(words[i - 2], 19) ^ right_rotate(words[i - 2], 61) ^ (words[i - 2] >> 6);
+        words[i] = words[i - 16] + s0 + words[i - 7] + s1 & 0xFFFFFFFFFFFFFFFFULL;
+    }
+}
 /* Function name:
    Description:
    Function parameters:
        param_name - description
 */
-void processChunk(uint8_t* const block) {
-    uint64_t words[80];
-    uint64_t a = h_values[0];
-    uint64_t b = h_values[1];
-    uint64_t c = h_values[2];
-    uint64_t d = h_values[3];
-    uint64_t e = h_values[4];
-    uint64_t f = h_values[5];
-    uint64_t g = h_values[6];
-    uint64_t h = h_values[7];
-    for (int i = 0; i < 16; i++) {
-        int offset = i * 8;
-        words[i] =  ((uint64_t)(uint8_t)block[offset] << 56)     |
-                    ((uint64_t)(uint8_t)block[offset + 1] << 48) |
-                    ((uint64_t)(uint8_t)block[offset + 2] << 40) |
-                    ((uint64_t)(uint8_t)block[offset + 3] << 32) |
-                    ((uint64_t)(uint8_t)block[offset + 4] << 24) |
-                    ((uint64_t)(uint8_t)block[offset + 5] << 16) |
-                    ((uint64_t)(uint8_t)block[offset + 6] << 8)  |
-                     (uint64_t)(uint8_t)block[offset + 7];
+bool processRounds() {
+    static uint16_t i = 0;
+    static uint64_t a, b, c, d, e, f, g, h;
+    if (i == 0) {
+        a = h_values[0];
+        b = h_values[1];
+        c = h_values[2];
+        d = h_values[3];
+        e = h_values[4];
+        f = h_values[5];
+        g = h_values[6];
+        h = h_values[7];
     }
-    for (int i = 16; i < 80; i++) {
-        uint64_t s0 = right_rotate(words[i - 15], 1) ^ right_rotate(words[i - 15], 8) ^ (words[i - 15] >> 7);
-        uint64_t s1 = right_rotate(words[i - 2], 19) ^ right_rotate(words[i - 2], 61) ^ (words[i - 2] >> 6);
-        words[i] = (words[i - 16] + s0 + words[i - 7] + s1) & 0xFFFFFFFFFFFFFFFF;
-    }
-    for (int i = 0; i < 80; i++) {
+    uint16_t j = i;
+    for (i = j; i < j+20; ++i) {
         uint64_t S1 = right_rotate(e, 14) ^ right_rotate(e, 18) ^ right_rotate(e, 41);
         uint64_t ch = (e & f) ^ (~e & g);
         uint64_t temp1 = h + S1 + ch + k[i] + words[i];
         uint64_t S0 = right_rotate(a, 28) ^ right_rotate(a, 34) ^ right_rotate(a, 39);
         uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
         uint64_t temp2 = S0 + maj;
-        
+
         h = g;
         g = f;
         f = e;
@@ -222,14 +227,35 @@ void processChunk(uint8_t* const block) {
         b = a;
         a = temp1 + temp2;
     }
-    h_values[0] += a;
-    h_values[1] += b;
-    h_values[2] += c;
-    h_values[3] += d;
-    h_values[4] += e;
-    h_values[5] += f;
-    h_values[6] += g;
-    h_values[7] += h;
+    bool return_value = false;
+    if (i == 80) {
+        i = 0;
+        printf("\n------hash------\n");
+        printf("%016" PRIx64 , h_values[0]);
+        h_values[0] += a;
+        printf("\n------a-------\n");
+        printf("%016" PRIx64 , a);
+        printf("\n------a+hash-------\n");
+        printf("%016" PRIx64 , h_values[0]);
+        // printf("%016" PRIx64 , h_values[0]);
+        h_values[1] += b;
+        // printf("%016" PRIx64 , h_values[1]);
+        h_values[2] += c;
+        // printf("%016" PRIx64 , h_values[2]);
+        h_values[3] += d;
+        // printf("%016" PRIx64 , h_values[3]);
+        h_values[4] += e;
+        // printf("%016" PRIx64 , h_values[4]);
+        h_values[5] += f;
+        // printf("%016" PRIx64 , h_values[5]);
+        h_values[6] += g;
+        // printf("%016" PRIx64 , h_values[6]);
+        h_values[7] += h;
+        // printf("%016" PRIx64 , h_values[7]);
+        printf("\n--------\n");
+        return_value = true;
+    }
+    return return_value;
 }
 
 /*#################################*/
@@ -245,7 +271,6 @@ teCySecDrvStatus CySecDrvGetSecurityState () {
 }
 
 void CySecDrvInit() {
-    printf("Entering CySecDrvInit\n");
 	uint32_t i;
 	current_status = UNDEFINED;
 	initialize_H_Values();
@@ -255,45 +280,30 @@ void CySecDrvInit() {
     }
 }
 
-int coutn = 0;
+int count = 0;
 void CySecDrvMain() {
-    getNextChunk();
-    processChunk(chunk);
-    coutn++;
-    if (lastChunk) {
-        printf("coutn: %d\n", coutn);
-        coutn = 0;
-        // printf("\nSHA-512 Hash: %016llx%016llx%016llx%016llx%016llx%016llx%016llx%016llx\n",
-        // h_values[0], h_values[1], h_values[2], h_values[3], h_values[4], h_values[5], h_values[6], h_values[7]);
-        current_status = SECURED;
-        uint8_t i;
-        for(i=0; i<8; i++) {
-            if (h_values[i] != CySecStaticHash[i]) {
-                current_status = NOT_SECURED;
-                break;
+    count++;
+    static bool finished_round = true;
+    if (finished_round) {
+        if (lastChunk) {
+            current_status = SECURED;
+            uint16_t i;
+            // printf("Hash: \n");
+            for(i=0; i<8; i++) {
+                // printf("\t%016" PRIx64 "\n", h_values[i]);
+                if (h_values[i] != CySecStaticHash[i]) {
+                    current_status = NOT_SECURED;
+                    break;
+                }
             }
+            initialize_H_Values();
+            // printf("Count: %d\n", count);
+            count = 0;
         }
-        initialize_H_Values();
+        getNextChunk();
+        wordsInit();
+        finished_round = false;
+    } else {
+        finished_round = processRounds();
     }
 }
-
-	// serialWrite("Before reading memory \n\r");
-	// uint8_t *address = (uint8_t *)0x6000;
-	// uint8_t ucTest[2048];
-	// for (i=0; i<2048; i++) {
-	//	ucTest[i] = pgm_read_byte(address[i]);
-	// }
-	// serialWrite("After reading memory \n\r");
-	// serialWrite("Before calculating hash \n\r");
-
-
-//	for (i=0; i<8; i++){
-		// sprintf(print_h, "%016llx", h_values[i]);
-		// serialWrite("LOOP!\n\r");
-		//serialWrite64(h_values[i]);
-		//serialWrite("\n\r");
-		//if (h_values[i] != CySecStaticHash[i]) {
-//			current_status = NOT_SECURED;
-			//break;
-		//}
-	//}
