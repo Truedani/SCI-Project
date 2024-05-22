@@ -1,3 +1,5 @@
+#define DEBUG true
+#if defined(DEBUG) && (DEBUG == true)
 #ifndef _H_
 #define OS_H_
 #include <inttypes.h>
@@ -8,4 +10,5 @@ extern void serialWrite32(uint32_t number);
 extern void serialWrite16(uint16_t number);
 extern void serialWrite8(uint8_t number);
 
+#endif
 #endif

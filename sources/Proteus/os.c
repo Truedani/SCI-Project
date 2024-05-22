@@ -21,7 +21,6 @@
 #include "CySecDrv.h"
 #include "LedDrv.h"
 
-#include "LedDrv.h"
 #include "BtnDrv.h"
 
 /*#################################*/
@@ -88,7 +87,10 @@ void OS_vTimerInit(void)
 
 void OS_vCyclicTask5ms(void)
 {
+	LedDrvSetLedState(LED_LEFT, ON);
+	CySecDrvMain();
 	BtnDrvMain();
+	LedDrvSetLedState(LED_LEFT, OFF);
 }
 
 void OS_vCyclicTask10ms(void)
@@ -108,7 +110,7 @@ void OS_vCyclicTask100ms(void)
 
 void OS_vCyclicTask500ms(void)
 {
-	CySecDrvMain();
+	
 }
 
 void OS_vBackgroundTask(void)

@@ -20,12 +20,11 @@
 #include <string.h>
 #include <inttypes.h>
 #include <util/delay.h>
+#include "LedDrv.h"
 
 /*#################################*/
 /*         Local defines           */
 /*#################################*/
-// TODO: remove F_CPU in final version
-#define F_CPU 8000000UL
 #define H0 0x6a09e667f3bcc908ULL
 #define H1 0xbb67ae8584caa73bULL
 #define H2 0x3c6ef372fe94f82bULL
@@ -35,24 +34,30 @@
 #define H6 0x1f83d9abfb41bd6bULL
 #define H7 0x5be0cd19137e2179ULL
 
-// Q: move to header?
-const uint64_t CySecStaticHash[] PROGMEM =
-{
-    0xd3f3abf79fa8b7b0ull,
-    0xcdb70a5737cf9b2dull,
-    0x79ec83a9c322599aull,
-    0x30404165174f1cffull,
-    0x84bc0bc775564fa0ull,
-    0xc57bf59502d82092ull,
-    0xd10248857838212eull,
-    0xd0a29bc8eadad371ull
-};
+#define MAX_ROUNDS 80
+#define WORDS_SIZE 80 // message schedule array
+#define CHUNK_SIZE 16
+// with 1 round and 2 words per init finishes in 10295 ms in less then 2.5ms per 5ms cycle
+// with 1 round and 3 words per init finishes in 9190  ms
+// with 2 rounds and 2 words per init finishes in 6900ms but the load on round gets to about 3ms
+#define ROUND_BATCH_SIZE 1
+#define WORDS_BATCH_SIZE 3
+#define PRINT true		// TODO: remove PRINT in final version
+#define F_CPU 8000000UL // TODO: remove F_CPU in final version 
 
 teCySecDrvStatus current_status = UNDEFINED;
 
 /*#################################*/
 /*        Local data types         */
 /*#################################*/
+typedef enum
+{
+	NEXT_CHUNK = 0u,
+	RESET_HASH = 1u,
+	INIT_WORDS = 2u,
+	PROCESS_ROUND = 3u,
+	FINISHED = 4u
+} teHashState;
 
 /*#################################*/
 /*        Global ROM data          */
@@ -61,7 +66,6 @@ teCySecDrvStatus current_status = UNDEFINED;
 /*#################################*/
 /*        Global RAM data          */
 /*#################################*/
-
 
 /*#################################*/
 /*        Local ROM data           */
@@ -84,24 +88,17 @@ const uint64_t k[80] PROGMEM = {
     0x113f9804bef90daeULL, 0x1b710b35131c471bULL, 0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL,
     0x431d67c49c100d4cULL, 0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
 };
-
-uint8_t const paddingFor128Bytes[128] PROGMEM = {
-    0x80, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
-    0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x40, 0x00
+// Q: move to header?
+const uint64_t CySecStaticHash[] PROGMEM =
+{
+    0xd3f3abf79fa8b7b0ull,
+    0xcdb70a5737cf9b2dull,
+    0x79ec83a9c322599aull,
+    0x30404165174f1cffull,
+    0x84bc0bc775564fa0ull,
+    0xc57bf59502d82092ull,
+    0xd10248857838212eull,
+    0xd0a29bc8eadad371ull
 };
 
 
@@ -109,16 +106,18 @@ uint8_t const paddingFor128Bytes[128] PROGMEM = {
 /*        Local RAM data           */
 /*#################################*/
 uint64_t h_values[8];
-uint8_t chunk[128];
+uint8_t chunk[CHUNK_SIZE*8];
 bool lastChunk = false;
 
 /*#################################*/
 /*    Local function declaration   */
 /*#################################*/
 /* Function name: readU64FromProgmem
-   Description: reads 64bit variable from flash memory
-   Function parameters: 
-       addr - pointer to the flash address
+	Description: reads 64bit variable from flash memory
+	Function parameters: 
+		addr - pointer to the flash address
+	Function output:
+		64bit unsigned int with the value read
 */
 uint64_t readU64FromProgmem(const uint64_t* addr) {
     uint32_t lower = pgm_read_dword((const uint32_t*)addr);
@@ -158,18 +157,18 @@ void initialize_H_Values() {
 /* Function name: getNextChunk
    Description:	Updates the next 128byte chunk to be processed from flash memory
 */
-// bool print_once = false;
 void getNextChunk() {
-	static uint8_t count=0;
-	int i;
+	static uint16_t count=0;
+	uint16_t i;
     if (lastChunk) {
         count = 0;
         lastChunk = false;
     }
-    if (count == 16) {
-        for (i = 0; i < 128; i++) {
-            chunk[i] = pgm_read_byte_near(&paddingFor128Bytes[i]);
-        }
+    if (count == CHUNK_SIZE) {
+		chunk[0] = 0x80;
+		for(i=1; i<126; i++) chunk[i] = 0x0;
+		chunk[126] = 0x40;
+		chunk[127] = 0x00;
         lastChunk = true;
     } else {
 		for (i=count*128; i<count*128+128; i++) {
@@ -180,46 +179,65 @@ void getNextChunk() {
     return;
 }
 
-/* Function name: processChunk
-   Description: processes the current chunk buffer
+/* Function name: wordsInit
+   Description: initialize words list for processRounds
 */
-void processChunk() {
+uint64_t words[WORDS_SIZE];
+teHashState wordsInit() {
+    static uint16_t i = 0;
+	uint16_t last_i = i;
+	for(i=last_i; (i<(last_i+WORDS_BATCH_SIZE)) && (i <  WORDS_SIZE); i++)
+		if (i < CHUNK_SIZE){
+			uint16_t offset = i * 8;
+			words[i] = ((uint64_t)chunk[offset]     << 56) |
+					   ((uint64_t)chunk[offset + 1] << 48) |
+					   ((uint64_t)chunk[offset + 2] << 40) |
+					   ((uint64_t)chunk[offset + 3] << 32) |
+					   ((uint64_t)chunk[offset + 4] << 24) |
+					   ((uint64_t)chunk[offset + 5] << 16) |
+					   ((uint64_t)chunk[offset + 6] << 8)  |
+						(uint64_t)chunk[offset + 7];
+		}
+		else {
+			uint64_t s0 = right_rotate(words[i - 15], 1) ^ right_rotate(words[i - 15], 8) ^ (words[i - 15] >> 7);
+			uint64_t s1 = right_rotate(words[i - 2], 19) ^ right_rotate(words[i - 2], 61) ^ (words[i - 2] >> 6);
+			words[i] = (words[i - 16] + s0 + words[i - 7] + s1) & 0xFFFFFFFFFFFFFFFFULL;
+		}
+	teHashState returnValue;
+	if (i == WORDS_SIZE)  {
+		returnValue = PROCESS_ROUND;
+		i = 0;
+	}
+	else
+		returnValue = INIT_WORDS;
+	return returnValue;
+}
 
-    uint64_t words[80];
-    uint64_t a = h_values[0];
-    uint64_t b = h_values[1];
-    uint64_t c = h_values[2];
-    uint64_t d = h_values[3];
-    uint64_t e = h_values[4];
-    uint64_t f = h_values[5];
-    uint64_t g = h_values[6];
-    uint64_t h = h_values[7];
-	int i = 0;
-		
-    for (i = 0; i < 16; i++) {
-        int offset = i * 8;
-        words[i] =  ((uint64_t)(uint8_t)chunk[offset] << 56)     |
-                    ((uint64_t)(uint8_t)chunk[offset + 1] << 48) |
-                    ((uint64_t)(uint8_t)chunk[offset + 2] << 40) |
-                    ((uint64_t)(uint8_t)chunk[offset + 3] << 32) |
-                    ((uint64_t)(uint8_t)chunk[offset + 4] << 24) |
-                    ((uint64_t)(uint8_t)chunk[offset + 5] << 16) |
-                    ((uint64_t)(uint8_t)chunk[offset + 6] << 8)  |
-                     (uint64_t)(uint8_t)chunk[offset + 7];
+/* Function name: processRounds
+   Description: processes ROUND_BATCH_SIZE/MAX_ROUNDS rounds from the current chunk buffer
+*/
+teHashState processRounds() {
+    static uint16_t i = 0;
+    static uint64_t a, b, c, d, e, f, g, h;
+    if (i == 0) {
+        a = h_values[0];
+        b = h_values[1];
+        c = h_values[2];
+        d = h_values[3];
+        e = h_values[4];
+        f = h_values[5];
+        g = h_values[6];
+        h = h_values[7];
     }
-    for (i = 16; i < 80; i++) {
-        uint64_t s0 = right_rotate(words[i - 15], 1) ^ right_rotate(words[i - 15], 8) ^ (words[i - 15] >> 7);
-        uint64_t s1 = right_rotate(words[i - 2], 19) ^ right_rotate(words[i - 2], 61) ^ (words[i - 2] >> 6);
-        words[i] = (words[i - 16] + s0 + words[i - 7] + s1) & 0xFFFFFFFFFFFFFFFFULL;
-    }
-    for (i = 0; i < 80; i++) {
+    uint16_t last_i = i;
+    for (i = last_i; (i < (last_i+ROUND_BATCH_SIZE)) && (i < MAX_ROUNDS); ++i) {
         uint64_t S1 = right_rotate(e, 14) ^ right_rotate(e, 18) ^ right_rotate(e, 41);
         uint64_t ch = (e & f) ^ (~e & g);
         uint64_t temp1 = h + S1 + ch + readU64FromProgmem(&k[i]) + words[i];
         uint64_t S0 = right_rotate(a, 28) ^ right_rotate(a, 34) ^ right_rotate(a, 39);
         uint64_t maj = (a & b) ^ (a & c) ^ (b & c);
         uint64_t temp2 = S0 + maj;
-        
+
         h = g;
         g = f;
         f = e;
@@ -229,14 +247,21 @@ void processChunk() {
         b = a;
         a = temp1 + temp2;
     }
-    h_values[0] += a;
-    h_values[1] += b;
-    h_values[2] += c;
-    h_values[3] += d;
-    h_values[4] += e;
-    h_values[5] += f;
-    h_values[6] += g;
-    h_values[7] += h;
+    teHashState return_value = PROCESS_ROUND;
+    if (i == MAX_ROUNDS) {
+        i = 0;
+        h_values[0] += a;
+        h_values[1] += b;
+        h_values[2] += c;
+        h_values[3] += d;
+        h_values[4] += e;
+        h_values[5] += f;
+        h_values[6] += g;
+        h_values[7] += h;
+		if (lastChunk) return_value = FINISHED;
+		else return_value = NEXT_CHUNK;
+    }
+    return return_value;
 }
 
 /*#################################*/
@@ -253,30 +278,58 @@ teCySecDrvStatus CySecDrvGetSecurityState () {
 
 void CySecDrvInit() {
 	serialInit();
-	serialWrite("Security Init!\n\r");
+	if(PRINT) serialWrite("Security Init!\n\r");
 	current_status = UNDEFINED;
 	initialize_H_Values();
-     while (current_status == UNDEFINED) {
+    while (current_status == UNDEFINED) {
          CySecDrvMain();
     }
 }
 
 void CySecDrvMain() {
-    getNextChunk();
-	processChunk();
-    if (lastChunk) {
-		current_status = SECURED;
-		uint8_t i;
-        for(i=0; i<8; i++) {
-			serialWrite64(h_values[i]);
-			serialWrite("\n\r");
-            if (h_values[i] != readU64FromProgmem(&CySecStaticHash[i])) {
-                current_status = NOT_SECURED;
-				serialWrite("NOT SECURED\n\r\n\r");
-                break;
+	static uint64_t count = 0;
+	count ++;
+	static teHashState hash_state = NEXT_CHUNK;
+	switch(hash_state){
+        case NEXT_CHUNK:
+			if(lastChunk) hash_state = RESET_HASH;
+			else hash_state = INIT_WORDS;
+			getNextChunk();
+			break;
+		case RESET_HASH:
+            initialize_H_Values();
+			if(PRINT) { serialWrite("Count: "); serialWrite64(count); serialWrite("\n\r\n\r"); }
+			count = 0;
+			hash_state = INIT_WORDS;
+			break;
+		case INIT_WORDS:
+			// LedDrvSetLedState(LED_LEFT, ON);
+			hash_state = wordsInit();
+			// hash_state = PROCESS_ROUND;
+			// LedDrvSetLedState(LED_LEFT, OFF);
+			break;
+		case PROCESS_ROUND:
+			hash_state = processRounds();
+			break;
+		case FINISHED:
+            current_status = SECURED;
+            uint16_t i;
+            printf("Hash: \n");
+            for(i=0; i<8; i++) {
+				if(PRINT){ 
+					serialWrite64(h_values[i]);
+					serialWrite("\n\r");
+				}
+                if (h_values[i] != readU64FromProgmem(&CySecStaticHash[i])) {
+                    current_status = NOT_SECURED;
+					if(PRINT) serialWrite("NOT SECURED\n\r\n\r");
+                    break;
+                }
+				if(PRINT) if(i == 8) serialWrite("SECURED\n\r\n\r");
             }
-        }
-		if(i == 8) serialWrite("SECURED\n\r\n\r");
-        initialize_H_Values();
-    }
+			hash_state = NEXT_CHUNK;
+			break;
+		}
+
 }
+

@@ -33,6 +33,7 @@ typedef enum
 /*#################################*/
 /*       Global ROM data           */
 /*#################################*/
+// extern const uint64_t CySecStaticHash[8] PROGMEM;
 
 /*#################################*/
 /*       Global RAM data           */

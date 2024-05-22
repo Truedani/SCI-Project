@@ -1,4 +1,5 @@
 #include "MySerial.h"
+#if defined(DEBUG) && (DEBUG == true)
 #include <avr/io.h>
 #include <avr/interrupt.h>
 #include <string.h>
@@ -131,3 +132,4 @@ void serialWrite8(uint8_t number) {
 	UDR = b;
 	while(!(UCSRA & (1 << UDRE)));
 }
+#endif
