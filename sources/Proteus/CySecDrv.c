@@ -45,8 +45,6 @@
 #define PRINT true		// TODO: remove PRINT in final version
 #define F_CPU 8000000UL // TODO: remove F_CPU in final version 
 
-teCySecDrvStatus current_status = UNDEFINED;
-
 /*#################################*/
 /*        Local data types         */
 /*#################################*/
@@ -54,7 +52,7 @@ typedef enum
 {
 	NEXT_CHUNK = 0u,
 	RESET_HASH = 1u,
-	INIT_WORDS = 2u,
+	INIT_WORDS = 2u, // message schedule array
 	PROCESS_ROUND = 3u,
 	FINISHED = 4u
 } teHashState;
@@ -88,7 +86,7 @@ const uint64_t k[80] PROGMEM = {
     0x113f9804bef90daeULL, 0x1b710b35131c471bULL, 0x28db77f523047d84ULL, 0x32caab7b40c72493ULL, 0x3c9ebe0a15c9bebcULL,
     0x431d67c49c100d4cULL, 0x4cc5d4becb3e42b6ULL, 0x597f299cfc657e2aULL, 0x5fcb6fab3ad6faecULL, 0x6c44198c4a475817ULL
 };
-// Q: move to header?
+
 const uint64_t CySecStaticHash[] PROGMEM =
 {
     0xd3f3abf79fa8b7b0ull,
@@ -105,6 +103,7 @@ const uint64_t CySecStaticHash[] PROGMEM =
 /*#################################*/
 /*        Local RAM data           */
 /*#################################*/
+teCySecDrvStatus current_status = UNDEFINED;
 uint64_t h_values[8];
 uint8_t chunk[CHUNK_SIZE*8];
 bool lastChunk = false;
@@ -322,11 +321,10 @@ void CySecDrvMain() {
 				}
                 if (h_values[i] != readU64FromProgmem(&CySecStaticHash[i])) {
                     current_status = NOT_SECURED;
-					if(PRINT) serialWrite("NOT SECURED\n\r\n\r");
                     break;
                 }
-				if(PRINT) if(i == 8) serialWrite("SECURED\n\r\n\r");
             }
+			if(PRINT) if (SECURED == current_status) serialWrite("SECURED\n\r\n\r"); else serialWrite("NOT SECURED\n\r\n\r");
 			hash_state = NEXT_CHUNK;
 			break;
 		}
